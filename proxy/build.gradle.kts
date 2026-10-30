@@ -39,6 +39,7 @@ tasks {
         exclude("org/checkerframework/checker/**")
 
         relocate("org.bstats", "com.velocitypowered.proxy.bstats")
+        relocate("com.southernstorm", "com.velocitypowered.proxy.apdp.internal.southernstorm")
 
         // Include Configurate 3
         val configurateBuildTask = project(":deprecated-configurate3").tasks.named("shadowJar")
@@ -117,6 +118,7 @@ dependencies {
     implementation(libs.adventure.text.serializer.json.legacy.impl)
     implementation(libs.completablefutures)
     implementation(libs.nightconfig)
+    implementation(libs.noise)
     implementation(libs.bstats)
     implementation(libs.lmbda)
     implementation(libs.asm)

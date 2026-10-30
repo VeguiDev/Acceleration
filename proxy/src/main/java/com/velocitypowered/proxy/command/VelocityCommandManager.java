@@ -256,7 +256,9 @@ public class VelocityCommandManager implements CommandManager {
       }
     } catch (final Throwable e) {
       // Ugly, ugly swallowing of everything Throwable, because plugins are naughty.
-      throw new RuntimeException("Unable to invoke command " + parsed.getReader().getString() + " for " + source, e);
+      throw new RuntimeException("Unable to invoke command "
+          + com.velocitypowered.proxy.apdp.ApdpCommand.redact(parsed.getReader().getString())
+          + " for " + source, e);
     } finally {
       eventManager.fireAndForget(new PostCommandInvocationEvent(source, parsed.getReader().getString(), result));
     }
@@ -319,7 +321,8 @@ public class VelocityCommandManager implements CommandManager {
     } catch (final Throwable e) {
       // Again, plugins are naughty
       return CompletableFuture.failedFuture(
-          new RuntimeException("Unable to provide suggestions for " + cmdLine + " for " + source,
+          new RuntimeException("Unable to provide suggestions for "
+              + com.velocitypowered.proxy.apdp.ApdpCommand.redact(cmdLine) + " for " + source,
               e));
     }
   }

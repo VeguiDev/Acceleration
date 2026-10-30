@@ -39,6 +39,8 @@ import com.velocitypowered.api.proxy.server.ServerInfo;
 import com.velocitypowered.api.util.Favicon;
 import com.velocitypowered.api.util.GameProfile;
 import com.velocitypowered.api.util.ProxyVersion;
+import com.velocitypowered.proxy.apdp.ApdpCommand;
+import com.velocitypowered.proxy.apdp.ApdpService;
 import com.velocitypowered.proxy.command.VelocityCommandManager;
 import com.velocitypowered.proxy.command.builtin.CallbackCommand;
 import com.velocitypowered.proxy.command.builtin.GlistCommand;
@@ -156,6 +158,12 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
   private final ConnectionManager cm;
   private final ProxyOptions options;
   private @MonotonicNonNull VelocityConfiguration configuration;
+  private @MonotonicNonNull ApdpService apdp;
+
+  public ApdpService getApdp() {
+    return apdp;
+  }
+
   private @MonotonicNonNull KeyPair serverKeyPair;
   private final ServerMap servers;
   private final VelocityCommandManager commandManager;
@@ -316,6 +324,18 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
 
     // init console permissions after plugins are loaded
     console.setupPermissions();
+
+    apdp = new ApdpService(Path.of("."), () -> getAllServers().stream()
+        .map(server -> server.getServerInfo().getName().toLowerCase(Locale.ROOT))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+    try {
+      apdp.start();
+    } catch (IOException | java.security.GeneralSecurityException e) {
+      apdp.close();
+      throw new IllegalStateException("APDP state or startup authorization is invalid", e);
+    }
+    commandManager.register(commandManager.metaBuilder("apdp")
+        .plugin(VelocityVirtualPlugin.INSTANCE).build(), new ApdpCommand(apdp));
 
     final Integer port = this.options.getPort();
     if (port != null) {
@@ -615,6 +635,9 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
 
       // Stop accepting new connections, but keep DNS available to pre-shutdown handlers.
       cm.closeEndpoints(true);
+      if (apdp != null) {
+        apdp.close();
+      }
 
       try {
         eventManager.fire(new ProxyPreShutdownEvent())

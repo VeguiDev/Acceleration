@@ -65,7 +65,8 @@ public interface CommandHandler<T extends MinecraftPacket> {
             .thenComposeAsync(event -> futurePacketCreator.apply(event, newLastSeenMessages))
             .thenApply(pkt -> {
               if (server.getConfiguration().isLogCommandExecutions()) {
-                logger.info("{} -> executed command /{}", player, message);
+                logger.info("{} -> executed command /{}", player,
+                    com.velocitypowered.proxy.apdp.ApdpCommand.redact(message));
               }
               return pkt;
             }).exceptionally(e -> {

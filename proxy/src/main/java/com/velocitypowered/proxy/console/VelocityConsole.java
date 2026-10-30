@@ -108,6 +108,7 @@ public final class VelocityConsole extends SimpleTerminalConsole implements Cons
     return super.buildReader(builder
         .appName("Velocity")
         .variable(LineReader.HISTORY_FILE, Path.of(".console_history"))
+        .variable(LineReader.HISTORY_IGNORE, "*apdp*")
         .completer((reader, parsedLine, list) -> {
           try {
             List<String> offers = this.server.getCommandManager()
@@ -137,7 +138,8 @@ public final class VelocityConsole extends SimpleTerminalConsole implements Cons
         return;
       }
       if (server.getConfiguration().isLogCommandExecutions()) {
-        logger.info("CONSOLE -> executed command /{}", command);
+        logger.info("CONSOLE -> executed command /{}",
+            com.velocitypowered.proxy.apdp.ApdpCommand.redact(command));
       }
     } catch (Exception e) {
       logger.error("An error occurred while running this command.", e);
