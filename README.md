@@ -5,6 +5,7 @@ supporting hierarchical proxies through authenticated incoming Modern Forwarding
 It is not an official PaperMC distribution.
 
 See [proxy backend configuration and verification](docs/proxy-backend.md).
+See [APDP discovery, enrollment and administration](docs/apdp.md).
 The generated executable is `proxy/build/libs/acceleration-proxy-4.3.2-SNAPSHOT-all.jar`.
 Java 25 is required. Existing `velocity.toml`, plugins and Java API packages are retained.
 
