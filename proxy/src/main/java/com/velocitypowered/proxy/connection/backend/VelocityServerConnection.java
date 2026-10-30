@@ -246,6 +246,9 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
    * Disconnects from the server.
    */
   public void disconnect() {
+    if (server.getAdcr() != null) {
+      server.getAdcr().backendClosed(this);
+    }
     if (connection != null) {
       gracefulDisconnect = true;
       connection.close(false);

@@ -104,6 +104,14 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
               packet.getId(), true, forwardingData);
       mc.write(response);
       informationForwarded = true;
+    } else if (packet.getChannel().equals(com.velocitypowered.proxy.adcr.AdcrService.CHANNEL)
+        && informationForwarded && server.getAdcr() != null && server.getAdcr().enabled()) {
+      try {
+        byte[] offer = server.getAdcr().offer(serverConn, ByteBufUtil.getBytes(packet.content()));
+        mc.write(new LoginPluginResponsePacket(packet.getId(), true, Unpooled.wrappedBuffer(offer)));
+      } catch (Exception e) {
+        mc.write(new LoginPluginResponsePacket(packet.getId(), false, Unpooled.EMPTY_BUFFER));
+      }
     } else {
       // Don't understand, fire event if we have subscribers
       if (!this.server.getEventManager().hasSubscribers(ServerLoginPluginMessageEvent.class)) {

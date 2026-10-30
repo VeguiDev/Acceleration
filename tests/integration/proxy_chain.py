@@ -74,7 +74,9 @@ def freeport():
 
 
 class Backend:
-    def __init__(self):
+    def __init__(self, commands=False, lifetime=15):
+        self.commands = commands
+        self.lifetime = lifetime
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
         self.port = self.listener.getsockname()[1]
@@ -111,7 +113,9 @@ class Backend:
                 # Minecraft 1.13 Join Game; enough to complete both proxies' initial connection.
                 send(s, b"\x25" + struct.pack(">iBiBB", 1, 0, 0, 1, 20)
                      + string("default") + b"\x00")
-                self.done.wait(15)
+                if self.commands:
+                    send(s, b"\x11\x01\x00\x00\x00")  # Empty vanilla command tree.
+                self.done.wait(self.lifetime)
         except Exception as exc:
             self.error = exc
         finally:

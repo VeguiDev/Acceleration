@@ -937,6 +937,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   }
 
   void teardown() {
+    if (server.getAdcr() != null) {
+      server.getAdcr().disconnect(this);
+    }
     if (connectionInFlight != null) {
       connectionInFlight.disconnect();
     }

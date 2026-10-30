@@ -103,6 +103,12 @@ public class SessionCommandHandler extends RateLimitedCommandHandler<SessionPlay
     queueCommandResult(this.server, this.player, (event, newLastSeenMessages) -> {
       SessionPlayerCommandPacket fixedPacket = packet.withLastSeenMessages(newLastSeenMessages);
 
+      // Never execute a distributed side effect before discovering that consuming its signed
+      // arguments would invalidate the client's secure-chat chain. Preserve the original packet.
+      if (packet.isSigned() && server.getAdcr() != null && server.getAdcr().active(player)) {
+        return CompletableFuture.completedFuture(fixedPacket);
+      }
+
       CommandExecuteEvent.CommandResult result = event.getResult();
       if (result == CommandExecuteEvent.CommandResult.denied()) {
         return CompletableFuture.completedFuture(consumeCommand(fixedPacket));

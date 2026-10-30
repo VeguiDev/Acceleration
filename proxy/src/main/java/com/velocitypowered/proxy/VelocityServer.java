@@ -39,6 +39,7 @@ import com.velocitypowered.api.proxy.server.ServerInfo;
 import com.velocitypowered.api.util.Favicon;
 import com.velocitypowered.api.util.GameProfile;
 import com.velocitypowered.api.util.ProxyVersion;
+import com.velocitypowered.proxy.adcr.AdcrService;
 import com.velocitypowered.proxy.apdp.ApdpCommand;
 import com.velocitypowered.proxy.apdp.ApdpService;
 import com.velocitypowered.proxy.command.VelocityCommandManager;
@@ -159,6 +160,11 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
   private final ProxyOptions options;
   private @MonotonicNonNull VelocityConfiguration configuration;
   private @MonotonicNonNull ApdpService apdp;
+  private @MonotonicNonNull AdcrService adcr;
+
+  public AdcrService getAdcr() {
+    return adcr;
+  }
 
   public ApdpService getApdp() {
     return apdp;
@@ -298,6 +304,8 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     );
     new GlistCommand(this).register();
     new SendCommand(this).register();
+    commandManager.rememberDistributedBuiltin("server");
+    commandManager.rememberDistributedBuiltin("send");
 
     this.doStartupConfigLoad();
 
@@ -336,6 +344,7 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     }
     commandManager.register(commandManager.metaBuilder("apdp")
         .plugin(VelocityVirtualPlugin.INSTANCE).build(), new ApdpCommand(apdp));
+    adcr = new AdcrService(this, apdp);
 
     final Integer port = this.options.getPort();
     if (port != null) {
@@ -636,6 +645,9 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
       // Stop accepting new connections, but keep DNS available to pre-shutdown handlers.
       cm.closeEndpoints(true);
       if (apdp != null) {
+        if (adcr != null) {
+          adcr.close();
+        }
         apdp.close();
       }
 

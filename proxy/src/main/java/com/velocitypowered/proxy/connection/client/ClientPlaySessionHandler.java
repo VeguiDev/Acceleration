@@ -757,13 +757,18 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   private boolean handleCommandTabComplete(TabCompleteRequestPacket packet) {
     // In 1.13+, we need to do additional work for the richer suggestions available.
     String command = packet.getCommand().substring(1);
+    boolean distributed = server.getAdcr() != null && server.getAdcr().active(player);
+    if (distributed && server.getAdcr().defer(player)) {
+      return false;
+    }
     int commandEndPosition = command.indexOf(' ');
     if (commandEndPosition == -1) {
       commandEndPosition = command.length();
     }
 
     String commandLabel = command.substring(0, commandEndPosition);
-    if (!server.getCommandManager().hasCommand(commandLabel, player)) {
+    if (!(distributed && server.getAdcr().handlesSuggestions(player, command))
+        && !server.getCommandManager().hasCommand(commandLabel, player)) {
       if (player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_13)) {
         // Outstanding tab completes are recorded for use with 1.12 clients and below to provide
         // additional tab completion support.
@@ -783,7 +788,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
     failedTabCompleteAttempts = 0;
 
-    server.getCommandManager().offerBrigadierSuggestions(player, command)
+    (distributed ? server.getAdcr().suggestions(player, command)
+        : server.getCommandManager().offerBrigadierSuggestions(player, command))
         .thenAcceptAsync(suggestions -> {
           if (suggestions.isEmpty()) {
             return;
@@ -796,7 +802,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
             }
           }
 
-          if (startPos > 0) {
+          // Distributed namespaces can complete the root label itself (range starts at zero).
+          if (startPos > 0 || (distributed && startPos == 0)) {
             List<Offer> offers = new ArrayList<>();
             for (Suggestion suggestion : suggestions.getList()) {
               String offer;

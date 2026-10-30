@@ -77,26 +77,43 @@ final class BackendLoginSessionHandler implements MinecraftSessionHandler {
         if (identity.key() != null) {
           inbound.setPlayerKey(identity.key());
         }
-        var event = new PreLoginEvent(inbound, identity.profile().getName(), identity.profile().getId());
-        server.getEventManager().fire(event).thenRunAsync(() -> {
-          if (connection.isClosed()) {
-            return;
-          }
-          if (!event.getResult().isAllowed()) {
-            inbound.disconnect(event.getResult().getReasonComponent().orElse(
-                Component.text("Login denied")));
-            return;
-          }
-          inbound.loginEventFired(() -> connection.eventLoop().execute(() -> {
-            if (!connection.isClosed()) {
-              connection.setActiveSessionHandler(StateRegistry.LOGIN,
-                  new AuthSessionHandler(server, inbound, identity.profile(), onlineMode, null));
+        Runnable authenticate = () -> {
+          var event = new PreLoginEvent(inbound, identity.profile().getName(), identity.profile().getId());
+          server.getEventManager().fire(event).thenRunAsync(() -> {
+            if (connection.isClosed()) {
+              return;
             }
-          }));
-        }, connection.eventLoop()).exceptionally(error -> {
-          connection.eventLoop().execute(this::reject);
-          return null;
-        });
+            if (!event.getResult().isAllowed()) {
+              inbound.disconnect(event.getResult().getReasonComponent().orElse(
+                  Component.text("Login denied")));
+              return;
+            }
+            inbound.loginEventFired(() -> connection.eventLoop().execute(() -> {
+              if (!connection.isClosed()) {
+                connection.setActiveSessionHandler(StateRegistry.LOGIN,
+                    new AuthSessionHandler(server, inbound, identity.profile(), onlineMode, null));
+              }
+            }));
+          }, connection.eventLoop()).exceptionally(error -> {
+            connection.eventLoop().execute(this::reject);
+            return null;
+          });
+        };
+        if (server.getAdcr() != null && server.getAdcr().enabled()) {
+          inbound.requestCommandRoute(server.getAdcr().challenge(), response -> {
+            if (response == null) {
+              authenticate.run();
+            } else {
+              server.getAdcr().accept(connection, identity.profile().getId(), response)
+                  .thenRunAsync(authenticate, connection.eventLoop()).exceptionally(error -> {
+                    connection.eventLoop().execute(this::reject);
+                    return null;
+                  });
+            }
+          });
+        } else {
+          authenticate.run();
+        }
       } catch (RuntimeException invalid) {
         reject();
       }

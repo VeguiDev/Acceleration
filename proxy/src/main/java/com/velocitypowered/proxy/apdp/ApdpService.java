@@ -94,6 +94,57 @@ public final class ApdpService implements AutoCloseable {
   private volatile Signed policy;
   private volatile Set<UUID> revoked = Set.of();
   private volatile Set<UUID> disabledInviters = Set.of();
+  private volatile java.util.function.BiFunction<UUID, JsonObject, JsonObject> commandHandler;
+
+  /** Installs the version-one ADCR neighbor protocol, separate from authority operations. */
+  public void commandHandler(java.util.function.BiFunction<UUID, JsonObject, JsonObject> handler) {
+    commandHandler = java.util.Objects.requireNonNull(handler);
+  }
+
+  /** Only live, mutually advertised direct neighbors accept command RPCs. No retries. */
+  public JsonObject commandRequest(UUID peer, JsonObject request) throws IOException {
+    Session session = commandSession(peer);
+    return session.request("COMMAND_RPC", request);
+  }
+
+  /** Reports the negotiated capability of a currently authenticated neighbor. */
+  public boolean commandPeer(UUID peer) {
+    try {
+      commandSession(peer);
+      return true;
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  public UUID commandParent() {
+    return parent == null ? null : parent.peer;
+  }
+
+  /** Head-only signed ADCR transfer authorization, independent of authority database RPCs. */
+  public Signed signCommandIntent(JsonObject intent) throws GeneralSecurityException, IOException {
+    if (state == null || !identity.nodeId().equals(state.head)) {
+      throw new IOException("Only head may authorize distributed transfers");
+    }
+    return Signed.sign(intent, identity.signing().getPrivate());
+  }
+
+  /** Verifies the pinned head signature; the caller must validate the intent's complete schema. */
+  public JsonObject verifyCommandIntent(Signed intent) throws GeneralSecurityException, IOException {
+    if (state == null) {
+      throw new IOException("APDP disabled");
+    }
+    return intent.verify(state.root);
+  }
+
+  private Session commandSession(UUID peer) throws IOException {
+    Session session = parent != null && parent.peer.equals(peer) ? parent : children.get(peer);
+    if (session == null || session.stopped || !session.commands || commandHandler == null
+        || revoked.contains(peer)) {
+      throw new IOException("ADCR neighbor unavailable");
+    }
+    return session;
+  }
 
   /** Public membership and pending enrollment metadata only; no bearer or private key. */
   public record Local(UUID network, UUID head, String root, Signed member, Signed parent,
@@ -637,6 +688,7 @@ public final class ApdpService implements AutoCloseable {
     private volatile long lastReceived = System.nanoTime();
     private volatile long writeStarted;
     private volatile boolean stopped;
+    private volatile boolean commands;
 
     private Session(NoiseChannel channel, UUID peer, boolean upstream) {
       this.channel = channel;
@@ -695,6 +747,24 @@ public final class ApdpService implements AutoCloseable {
         while (!closed && !stopped) {
           Frame frame = read();
           switch (frame.type) {
+            case "COMMAND_RPC":
+              if (!commands || commandHandler == null || !requests.tryAcquire()) {
+                throw new IOException("Unnegotiated or excessive ADCR request");
+              }
+              workers.submit(() -> {
+                try {
+                  send("RESULT", frame.id, commandHandler.apply(peer, frame.payload));
+                } catch (Exception e) {
+                  try {
+                    send("ERROR", frame.id, new JsonObject());
+                  } catch (Exception ignored) {
+                    stop();
+                  }
+                } finally {
+                  requests.release();
+                }
+              });
+              break;
             case "RESULT":
             case "ERROR":
               CompletableFuture<JsonObject> future = awaiting.get(frame.id);
@@ -784,6 +854,8 @@ public final class ApdpService implements AutoCloseable {
               fingerprint = "";
               break;
             case "HEARTBEAT":
+              commands = frame.payload.has("adcr")
+                  && Wire.integer(frame.payload, "adcr", 1, 1) == 1;
               break;
             default:
               throw new IOException("Unexpected APDP message");
@@ -879,7 +951,11 @@ public final class ApdpService implements AutoCloseable {
           session.stop();
         } else {
           try {
-            session.send("HEARTBEAT", null, new JsonObject());
+            JsonObject capabilities = new JsonObject();
+            if (commandHandler != null) {
+              capabilities.addProperty("adcr", 1);
+            }
+            session.send("HEARTBEAT", null, capabilities);
           } catch (Exception e) {
             session.stop();
           }

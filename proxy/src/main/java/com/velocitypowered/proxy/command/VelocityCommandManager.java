@@ -35,9 +35,11 @@ import com.velocitypowered.api.command.CommandManager;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandResult;
 import com.velocitypowered.api.command.CommandSource;
+import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.command.CommandExecuteEvent;
 import com.velocitypowered.api.event.command.PostCommandInvocationEvent;
 import com.velocitypowered.api.plugin.PluginManager;
+import com.velocitypowered.proxy.adcr.LocalCommandRegistry;
 import com.velocitypowered.proxy.command.brigadier.VelocityBrigadierCommandWrapper;
 import com.velocitypowered.proxy.command.registrar.BrigadierCommandRegistrar;
 import com.velocitypowered.proxy.command.registrar.CommandRegistrar;
@@ -48,9 +50,11 @@ import com.velocitypowered.proxy.plugin.virtual.VelocityVirtualPlugin;
 import io.netty.util.concurrent.FastThreadLocalThread;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -78,6 +82,12 @@ public class VelocityCommandManager implements CommandManager {
   private final CommandGraphInjector<CommandSource> injector;
   private final Map<String, CommandMeta> commandMetas;
   private final PluginManager pluginManager;
+  private final LocalCommandRegistry localRegistry = new LocalCommandRegistry();
+  private final Map<String, LocalCommandRegistry.Entry> registryEntries = new HashMap<>();
+
+  public LocalCommandRegistry getLocalRegistry() {
+    return localRegistry;
+  }
 
   /**
    * Constructs a command manager.
@@ -158,10 +168,45 @@ public class VelocityCommandManager implements CommandManager {
   private <T extends Command> void internalRegister(final CommandRegistrar<T> registrar,
       final Command command, final CommandMeta meta) {
     final Class<T> superInterface = registrar.registrableSuperInterface();
-    registrar.register(meta, superInterface.cast(command));
-    for (String alias : meta.getAliases()) {
-      commandMetas.put(alias, meta);
+    LocalCommandRegistry.Snapshot update;
+    lock.writeLock().lock();
+    try {
+      registrar.register(meta, superInterface.cast(command));
+      List<String> aliases = new ArrayList<>(meta.getAliases());
+      if (command instanceof BrigadierCommand brigadier
+          && VelocityCommands.isValidAlias(brigadier.getNode().getName())
+          && !aliases.contains(brigadier.getNode().getName())) {
+        aliases.add(brigadier.getNode().getName());
+      }
+      LocalCommandRegistry.Kind kind = command instanceof BrigadierCommand
+          ? LocalCommandRegistry.Kind.BRIGADIER : command instanceof SimpleCommand
+              ? LocalCommandRegistry.Kind.SIMPLE : LocalCommandRegistry.Kind.RAW;
+      LocalCommandRegistry.Entry entry = new LocalCommandRegistry.Entry(
+          UUID.randomUUID(), aliases.getFirst(), aliases, kind);
+      for (String alias : aliases) {
+        commandMetas.put(alias, meta);
+        registryEntries.put(alias, entry);
+      }
+      update = captureRegistry();
+    } finally {
+      lock.writeLock().unlock();
     }
+    localRegistry.notifyListeners(update);
+  }
+
+  private LocalCommandRegistry.Snapshot captureRegistry() {
+    Map<String, LocalCommandRegistry.Entry> effective = new HashMap<>();
+    registryEntries.forEach((alias, entry) -> {
+      if (dispatcher.getRoot().getChild(alias) != null) {
+        List<String> remaining = entry.aliases().stream()
+            .filter(name -> registryEntries.get(name) == entry
+                && dispatcher.getRoot().getChild(name) != null).toList();
+        effective.put(alias, new LocalCommandRegistry.Entry(entry.registration(),
+            remaining.contains(entry.name()) ? entry.name() : remaining.getFirst(),
+            remaining, entry.kind()));
+      }
+    });
+    return localRegistry.capture(effective);
   }
 
   private List<CommandRegistrar<?>> implementedRegistrars(final Command command) {
@@ -178,33 +223,41 @@ public class VelocityCommandManager implements CommandManager {
   @Override
   public void unregister(final String alias) {
     Preconditions.checkNotNull(alias, "alias");
+    LocalCommandRegistry.Snapshot update;
     lock.writeLock().lock();
     try {
       // The literals of secondary aliases will preserve the children of
       // the removed literal in the graph.
       dispatcher.getRoot().removeChildByName(alias.toLowerCase(Locale.ENGLISH));
-      commandMetas.remove(alias);
+      commandMetas.remove(alias.toLowerCase(Locale.ENGLISH));
+      registryEntries.remove(alias.toLowerCase(Locale.ENGLISH));
+      update = captureRegistry();
     } finally {
       lock.writeLock().unlock();
     }
+    localRegistry.notifyListeners(update);
   }
 
   @Override
   public void unregister(CommandMeta meta) {
     Preconditions.checkNotNull(meta, "meta");
+    LocalCommandRegistry.Snapshot update;
     lock.writeLock().lock();
     try {
       // The literals of secondary aliases will preserve the children of
       // the removed literal in the graph.
-      for (String alias : meta.getAliases()) {
+      for (String alias : List.copyOf(commandMetas.keySet())) {
         final String lowercased = alias.toLowerCase(Locale.ENGLISH);
         if (commandMetas.remove(lowercased, meta)) {
           dispatcher.getRoot().removeChildByName(lowercased);
+          registryEntries.remove(lowercased);
         }
       }
+      update = captureRegistry();
     } finally {
       lock.writeLock().unlock();
     }
+    localRegistry.notifyListeners(update);
   }
 
   @Override
@@ -302,6 +355,32 @@ public class VelocityCommandManager implements CommandManager {
     );
   }
 
+  /** Distributed ownership is revalidated before parsing; unknown due to denial is not forwarding. */
+  public CompletableFuture<com.velocitypowered.proxy.adcr.InvocationLedger.Outcome> executeOwned(
+      CommandSource source, String command, UUID registration) {
+    return CompletableFuture.supplyAsync(() -> {
+      String alias = command.split(" ", 2)[0].toLowerCase(Locale.ROOT);
+      var entry = localRegistry.snapshot().aliases().get(alias);
+      if (entry == null || !entry.registration().equals(registration)) {
+        return CompletableFuture.completedFuture(com.velocitypowered.proxy.adcr.InvocationLedger.Outcome.UNAVAILABLE);
+      }
+      var parsed = parse(command, source);
+      if (parsed.getContext().getNodes().isEmpty()) {
+        return CompletableFuture.completedFuture(com.velocitypowered.proxy.adcr.InvocationLedger.Outcome.DENIED);
+      }
+      return CompletableFuture.supplyAsync(() -> {
+        var current = localRegistry.snapshot().aliases().get(alias);
+        if (current == null || !current.registration().equals(registration)) {
+          return com.velocitypowered.proxy.adcr.InvocationLedger.Outcome.UNAVAILABLE;
+        }
+        return executeImmediately0(source, parsed)
+            ? com.velocitypowered.proxy.adcr.InvocationLedger.Outcome.EXECUTED
+            : com.velocitypowered.proxy.adcr.InvocationLedger.Outcome.EXPLICIT_FORWARD;
+      }, getAsyncExecutor(parsed));
+    }, figureAsyncExecutorForParsing()).thenCompose(result -> result)
+        .exceptionally(failure -> com.velocitypowered.proxy.adcr.InvocationLedger.Outcome.INDETERMINATE);
+  }
+
   @Override
   public CompletableFuture<List<String>> offerSuggestions(final CommandSource source,
       final String cmdLine) {
@@ -381,6 +460,17 @@ public class VelocityCommandManager implements CommandManager {
 
   public CommandGraphInjector<CommandSource> getInjector() {
     return injector;
+  }
+
+  private final Map<String, UUID> distributedBuiltins = new java.util.concurrent.ConcurrentHashMap<>();
+
+  /** Captures original built-in registrations before plugins are initialized. */
+  public void rememberDistributedBuiltin(String alias) {
+    distributedBuiltins.put(alias, localRegistry.snapshot().aliases().get(alias).registration());
+  }
+
+  public boolean isDistributedBuiltin(String alias, UUID registration) {
+    return registration.equals(distributedBuiltins.get(alias));
   }
 
   private Executor getAsyncExecutor(ParseResults<CommandSource> parse) {

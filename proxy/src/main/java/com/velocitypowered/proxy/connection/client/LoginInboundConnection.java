@@ -141,6 +141,14 @@ public class LoginInboundConnection implements LoginPhaseConnection, KeyIdentifi
     return id;
   }
 
+  int requestCommandRoute(byte[] challenge, MessageConsumer consumer) {
+    final int id = SEQUENCE_UPDATER.incrementAndGet(this);
+    outstandingResponses.put(id, consumer);
+    delegate.getConnection().write(new LoginPluginMessagePacket(id,
+        com.velocitypowered.proxy.adcr.AdcrService.CHANNEL, Unpooled.wrappedBuffer(challenge)));
+    return id;
+  }
+
   void handleLoginPluginResponse(final LoginPluginResponsePacket response) {
     final MessageConsumer consumer = this.outstandingResponses.remove(response.getId());
     if (consumer != null) {

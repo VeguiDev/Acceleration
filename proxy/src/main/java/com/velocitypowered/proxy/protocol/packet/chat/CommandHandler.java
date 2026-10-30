@@ -50,7 +50,9 @@ public interface CommandHandler<T extends MinecraftPacket> {
   default CompletableFuture<MinecraftPacket> runCommand(VelocityServer server,
       ConnectedPlayer player, String command,
       Function<Boolean, MinecraftPacket> hasRunPacketFunction) {
-    return server.getCommandManager().executeImmediatelyAsync(player, command)
+    return (server.getAdcr() == null
+        ? server.getCommandManager().executeImmediatelyAsync(player, command)
+        : server.getAdcr().execute(player, command))
         .thenApply(hasRunPacketFunction);
   }
 
