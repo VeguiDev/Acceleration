@@ -349,6 +349,13 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
     return remoteAddress;
   }
 
+  /** Applies an original address only after authenticating Modern Forwarding. */
+  public void applyForwardedAddress(java.net.InetAddress address) {
+    Preconditions.checkState(eventLoop().inEventLoop(), "Must run on the event loop");
+    this.remoteAddress = new InetSocketAddress(address,
+        ((InetSocketAddress) remoteAddress).getPort());
+  }
+
   public StateRegistry getState() {
     return state;
   }

@@ -71,7 +71,7 @@ import org.apache.logging.log4j.Logger;
  * Implements the {@code /velocity} command and friends.
  */
 public final class VelocityCommand {
-  private static final String USAGE = "/velocity <%s>";
+  private static final String USAGE = "/acceleration <%s>";
 
   @SuppressWarnings("checkstyle:MissingJavadocMethod")
   public static BrigadierCommand create(final VelocityServer server) {
@@ -103,7 +103,7 @@ public final class VelocityCommand {
     return new BrigadierCommand(
       commands.stream()
         .reduce(
-          BrigadierCommand.literalArgumentBuilder("velocity")
+          BrigadierCommand.literalArgumentBuilder("acceleration")
             .executes(ctx -> {
               final CommandSource source = ctx.getSource();
               final String availableCommands = commands.stream()
@@ -175,6 +175,10 @@ public final class VelocityCommand {
               Argument.component("year", Component.text(LocalDate.now().getYear())));
       source.sendMessage(velocity);
       source.sendMessage(copyright);
+      if (version.getName().equals("Acceleration")) {
+        source.sendMessage(Component.text("Acceleration — based on PaperMC Velocity")
+            .clickEvent(ClickEvent.openUrl("https://github.com/VeguiDev/Acceleration")));
+      }
 
       if (version.getName().equals("Velocity")) {
         final TextComponent embellishment = Component.text()

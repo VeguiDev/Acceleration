@@ -204,11 +204,11 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     String implVersion;
     String implVendor;
     if (pkg != null) {
-      implName = MoreObjects.firstNonNull(pkg.getImplementationTitle(), "Velocity");
+      implName = MoreObjects.firstNonNull(pkg.getImplementationTitle(), "Acceleration");
       implVersion = MoreObjects.firstNonNull(pkg.getImplementationVersion(), "<unknown>");
       implVendor = MoreObjects.firstNonNull(pkg.getImplementationVendor(), "Velocity Contributors");
     } else {
-      implName = "Velocity";
+      implName = "Acceleration";
       implVersion = "<unknown>";
       implVendor = "Velocity Contributors";
     }
@@ -219,8 +219,8 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
   private VelocityPluginContainer createVirtualPlugin() {
     ProxyVersion version = getVersion();
     PluginDescription description = new VelocityPluginDescription(
-        "velocity", version.getName(), version.getVersion(), "The Velocity proxy",
-            version.getName().equals("Velocity") ? VELOCITY_URL : null,
+        "velocity", version.getName(), version.getVersion(), "Acceleration, a fork of PaperMC Velocity",
+            "https://github.com/VeguiDev/Acceleration",
             ImmutableList.of(version.getVendor()), Collections.emptyList(),
             Collections.emptyList(), null);
     VelocityPluginContainer container = new VelocityPluginContainer(description);
@@ -261,6 +261,7 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     final BrigadierCommand velocityParentCommand = VelocityCommand.create(this);
     commandManager.register(
         commandManager.metaBuilder(velocityParentCommand)
+            .aliases("velocity")
             .plugin(VelocityVirtualPlugin.INSTANCE)
             .build(),
         velocityParentCommand
@@ -336,10 +337,12 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
 
     final String defaultPackage = new String(
         new byte[] { 'o', 'r', 'g', '.', 'b', 's', 't', 'a', 't', 's' });
-    if (!MetricsBase.class.getPackage().getName().startsWith(defaultPackage)) {
+    // Do not report fork installations under Velocity's upstream metrics identifier.
+    if (getVersion().getName().equals("Velocity")
+        && !MetricsBase.class.getPackage().getName().startsWith(defaultPackage)) {
       Metrics.VelocityMetrics.startMetrics(this, configuration.getMetrics());
     } else {
-      logger.warn("debug environment, metrics is disabled!");
+      logger.debug("Upstream Velocity metrics are disabled for this distribution.");
     }
   }
 
@@ -407,7 +410,7 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
       configuration = VelocityConfiguration.read(configPath);
 
       if (!configuration.validate()) {
-        logger.error("Your configuration is invalid. Velocity will not start up until the errors "
+        logger.error("Your configuration is invalid. Acceleration will not start up until the errors "
             + "are resolved.");
         LogManager.shutdown();
         System.exit(1);
@@ -483,6 +486,13 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
   public boolean reloadConfiguration() throws IOException {
     Path configPath = Path.of("velocity.toml");
     VelocityConfiguration newConfiguration = VelocityConfiguration.read(configPath);
+    if (configuration.isProxyBackend() != newConfiguration.isProxyBackend()
+        || (configuration.isProxyBackend()
+        && !java.util.Arrays.equals(configuration.getProxyBackendSecret(),
+            newConfiguration.getProxyBackendSecret()))) {
+      logger.error("Changing proxy-backend or its secret requires a restart.");
+      return false;
+    }
 
     if (!newConfiguration.validate()) {
       return false;

@@ -66,11 +66,15 @@ public class VelocityConfiguration implements ProxyConfig {
   @Expose
   private String bind = "0.0.0.0:25565";
   @Expose
-  private String motd = "<aqua>A Velocity Server";
+  private String motd = "<aqua>An Acceleration Server";
   @Expose
   private int showMaxPlayers = 500;
   @Expose
   private boolean onlineMode = true;
+  @Expose
+  private boolean proxyBackend;
+  private byte[] proxyBackendSecret = new byte[0];
+
   @Expose
   private boolean preventClientProxyConnections = false;
   @Expose
@@ -301,6 +305,14 @@ public class VelocityConfiguration implements ProxyConfig {
     return onlineMode;
   }
 
+  public boolean isProxyBackend() {
+    return proxyBackend;
+  }
+
+  public byte[] getProxyBackendSecret() {
+    return proxyBackendSecret.clone();
+  }
+
   @Override
   public boolean shouldPreventClientProxyConnections() {
     return preventClientProxyConnections;
@@ -465,7 +477,6 @@ public class VelocityConfiguration implements ProxyConfig {
         .add("showMaxPlayers", showMaxPlayers)
         .add("onlineMode", onlineMode)
         .add("playerInfoForwardingMode", playerInfoForwardingMode)
-        .add("forwardingSecret", forwardingSecret)
         .add("announceForge", announceForge)
         .add("servers", servers)
         .add("forcedHosts", forcedHosts)
@@ -548,7 +559,7 @@ public class VelocityConfiguration implements ProxyConfig {
         }
       }
       final byte[] forwardingSecret = forwardingSecretString.getBytes(StandardCharsets.UTF_8);
-      final String motd = config.getOrElse("motd", "<#09add3>A Velocity Server");
+      final String motd = config.getOrElse("motd", "<#09add3>An Acceleration Server");
 
       // Read the rest of the config
       final CommentedConfig serversConfig = config.get("servers");
@@ -581,7 +592,7 @@ public class VelocityConfiguration implements ProxyConfig {
         throw new RuntimeException("The forwarding-secret file must not be empty.");
       }
 
-      return new VelocityConfiguration(
+      final VelocityConfiguration result = new VelocityConfiguration(
               bind,
               motd,
               maxPlayers,
@@ -602,6 +613,19 @@ public class VelocityConfiguration implements ProxyConfig {
               forceKeyAuthentication,
               packetLimiterConfig
       );
+      result.proxyBackend = config.getOrElse("proxy-backend", false);
+      result.proxyBackendSecret = forwardingSecret.clone();
+      if (result.proxyBackend) {
+        final String incomingFile = config.getOrElse("proxy-backend-secret-file", "");
+        if (!incomingFile.isBlank()) {
+          result.proxyBackendSecret = String.join("", Files.readAllLines(Path.of(incomingFile)))
+              .getBytes(StandardCharsets.UTF_8);
+        }
+        if (result.proxyBackendSecret.length == 0) {
+          throw new IllegalArgumentException("The proxy backend secret must not be empty.");
+        }
+      }
+      return result;
     }
   }
 
@@ -936,7 +960,7 @@ public class VelocityConfiguration implements ProxyConfig {
     @Expose
     private int queryPort = 25565;
     @Expose
-    private String queryMap = "Velocity";
+    private String queryMap = "Acceleration";
     @Expose
     private boolean showPlugins = false;
 
@@ -954,7 +978,7 @@ public class VelocityConfiguration implements ProxyConfig {
       if (config != null) {
         this.queryEnabled = config.getOrElse("enabled", false);
         this.queryPort = config.getIntOrElse("port", 25565);
-        this.queryMap = config.getOrElse("map", "Velocity");
+        this.queryMap = config.getOrElse("map", "Acceleration");
         this.showPlugins = config.getOrElse("show-plugins", false);
       }
     }

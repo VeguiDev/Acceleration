@@ -13,6 +13,8 @@ application {
     applicationDefaultJvmArgs += listOf("-Dvelocity.packet-decode-logging=true")
 }
 
+evaluationDependsOn(":deprecated-configurate3")
+
 tasks {
     withType<Checkstyle> {
         exclude("**/com/velocitypowered/proxy/protocol/packet/**")
@@ -20,8 +22,8 @@ tasks {
 
     jar {
         manifest {
-            attributes["Implementation-Title"] = "Velocity"
-            attributes["Implementation-Vendor"] = "Velocity Contributors"
+            attributes["Implementation-Title"] = "Acceleration"
+            attributes["Implementation-Vendor"] = "Acceleration Contributors / Velocity Contributors"
             attributes["Multi-Release"] = "true"
         }
     }
@@ -66,7 +68,7 @@ tasks {
 
 val projectVersion = version as String
 fill {
-    project("velocity")
+    project("acceleration")
 
     build {
         channel = if (projectVersion.endsWith("-SNAPSHOT")) BuildChannel.BETA else BuildChannel.STABLE
@@ -87,8 +89,8 @@ fill {
 }
 
 dependencies {
-    implementation(project(":velocity-api"))
-    implementation(project(":velocity-native"))
+    implementation(project(":acceleration-api"))
+    implementation(project(":acceleration-native"))
 
     implementation(libs.bundles.log4j)
     implementation(libs.kyori.ansi)

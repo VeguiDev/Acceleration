@@ -57,6 +57,9 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * handshake packet is received.
  */
 public class HandshakeSessionHandler implements MinecraftSessionHandler {
+  // Aggregate pre-authentication protection; authenticated original IPs retain the usual limiter.
+  private static final com.google.common.util.concurrent.RateLimiter BACKEND_LOGIN_LIMITER =
+      com.google.common.util.concurrent.RateLimiter.create(100);
 
   private static final Logger LOGGER = LogManager.getLogger(HandshakeSessionHandler.class);
   private static final long LOGIN_TIMEOUT_MILLIS =
@@ -139,7 +142,8 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
     }
 
     final InetAddress address = ((InetSocketAddress) connection.getRemoteAddress()).getAddress();
-    if (!server.getIpAttemptLimiter().attempt(address)) {
+    if (server.getConfiguration().isProxyBackend() ? !BACKEND_LOGIN_LIMITER.tryAcquire()
+        : !server.getIpAttemptLimiter().attempt(address)) {
       // Bump connection into correct protocol state so that we can send the disconnect packet.
       connection.setState(StateRegistry.LOGIN);
       ic.disconnectQuietly(Component.translatable("velocity.error.logging-in-too-fast"));
@@ -150,7 +154,8 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
 
     // If the proxy is configured for modern forwarding, we must deny connections from 1.12.2
     // and lower, otherwise IP information will never get forwarded.
-    if (server.getConfiguration().getPlayerInfoForwardingMode() == PlayerInfoForwarding.MODERN
+    if ((server.getConfiguration().isProxyBackend()
+        || server.getConfiguration().getPlayerInfoForwardingMode() == PlayerInfoForwarding.MODERN)
         && handshake.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_13)) {
       // Bump connection into correct protocol state so that we can send the disconnect packet.
       connection.setState(StateRegistry.LOGIN);
@@ -163,7 +168,9 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
     server.getEventManager().fireAndForget(
             new ConnectionHandshakeEvent(lic, handshake.getIntent()));
     connection.setActiveSessionHandler(StateRegistry.LOGIN,
-        new InitialLoginSessionHandler(server, connection, lic));
+        server.getConfiguration().isProxyBackend()
+            ? new BackendLoginSessionHandler(server, connection, lic)
+            : new InitialLoginSessionHandler(server, connection, lic));
     scheduleLoginTimeout(ic);
   }
 

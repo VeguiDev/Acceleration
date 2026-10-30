@@ -133,6 +133,14 @@ public class LoginInboundConnection implements LoginPhaseConnection, KeyIdentifi
     this.onAllMessagesHandled = null;
   }
 
+  int requestForwarding(MessageConsumer consumer) {
+    final int id = SEQUENCE_UPDATER.incrementAndGet(this);
+    outstandingResponses.put(id, consumer);
+    delegate.getConnection().write(new LoginPluginMessagePacket(id, "velocity:player_info",
+        Unpooled.wrappedBuffer(new byte[] {4})));
+    return id;
+  }
+
   void handleLoginPluginResponse(final LoginPluginResponsePacket response) {
     final MessageConsumer consumer = this.outstandingResponses.remove(response.getId());
     if (consumer != null) {
