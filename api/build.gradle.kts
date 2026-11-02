@@ -62,7 +62,7 @@ tasks {
         o.source = "25"
 
         o.use()
-        o.links(
+        if (providers.gradleProperty("onlineJavadoc").isPresent) o.links(
             "https://www.javadocs.dev/org.slf4j/slf4j-api/${libs.slf4j.get().version}/",
             "https://guava.dev/releases/${libs.guava.get().version}/api/docs/",
             "https://google.github.io/guice/api-docs/${libs.guice.get().version}/javadoc/",

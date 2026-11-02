@@ -5,6 +5,8 @@ plugins {
 }
 
 subprojects {
+    group = rootProject.group
+    version = providers.gradleProperty("releaseVersion").getOrElse(rootProject.version.toString())
     apply<JavaLibraryPlugin>()
 
     apply(plugin = "velocity-checkstyle")

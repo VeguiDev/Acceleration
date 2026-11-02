@@ -54,3 +54,7 @@ If you want to translate a language not available on Crowdin,
 you might want to ask in the [Discord](https://discord.gg/papermc) about it.
 
 [![CI powered by namespace badge](https://papermc.io/assets/misc/namespace-oss-badge.svg?project=velocity)](https://namespace.so/github-actions/?utm_source=oss&utm_campaign=papermc)
+# Publishing and plugin API
+
+See [publishing and the compatible Acceleration API](docs/publishing.md) for
+GitHub Actions, R2 configuration and Maven dependency examples.

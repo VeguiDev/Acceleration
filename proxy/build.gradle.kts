@@ -73,7 +73,7 @@ fill {
 
     build {
         channel = if (projectVersion.endsWith("-SNAPSHOT")) BuildChannel.BETA else BuildChannel.STABLE
-        versionFamily("4.0.0")
+        versionFamily(projectVersion.substringBefore('.') + ".0.0")
         version(projectVersion)
 
         if (versionFamily.get().split(".")[0] != projectVersion.split(".")[0]) {

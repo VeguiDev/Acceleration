@@ -120,7 +120,19 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 /**
  * Implementation of {@link ProxyServer}.
  */
-public class VelocityServer implements ProxyServer, ForwardingAudience {
+public class VelocityServer implements dev.vegui.acceleration.api.AccelerationProxyServer,
+    ForwardingAudience {
+
+  @Override
+  public dev.vegui.acceleration.api.Discovery discovery() {
+    return new com.velocitypowered.proxy.apdp.PublicDiscovery(getApdp());
+  }
+
+  @Override
+  public dev.vegui.acceleration.api.CommandRegistry commandRegistry() {
+    return new com.velocitypowered.proxy.adcr.PublicCommandRegistry(
+        getCommandManager().getLocalRegistry());
+  }
 
   public static final String VELOCITY_URL = "https://papermc.io/software/velocity";
 
@@ -324,6 +336,9 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     ipAttemptLimiter = Ratelimiters.createWithMilliseconds(configuration.getLoginRatelimit());
     commandRateLimiter = Ratelimiters.createWithMilliseconds(configuration.getCommandRatelimit());
     tabCompleteRateLimiter = Ratelimiters.createWithMilliseconds(configuration.getTabCompleteRatelimit());
+    apdp = new ApdpService(Path.of("."), () -> getAllServers().stream()
+        .map(server -> server.getServerInfo().getName().toLowerCase(Locale.ROOT))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
     loadPlugins();
 
     // Go ahead and fire the proxy initialization event. We block since plugins should have a chance
@@ -333,9 +348,6 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     // init console permissions after plugins are loaded
     console.setupPermissions();
 
-    apdp = new ApdpService(Path.of("."), () -> getAllServers().stream()
-        .map(server -> server.getServerInfo().getName().toLowerCase(Locale.ROOT))
-        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
     try {
       apdp.start();
     } catch (IOException | java.security.GeneralSecurityException e) {

@@ -183,6 +183,7 @@ public class VelocityPluginManager implements PluginManager {
       @Override
       protected void configure() {
         bind(ProxyServer.class).toInstance(server);
+        bind(dev.vegui.acceleration.api.AccelerationProxyServer.class).toInstance(server);
         bind(PluginManager.class).toInstance(server.getPluginManager());
         bind(EventManager.class).toInstance(server.getEventManager());
         bind(CommandManager.class).toInstance(server.getCommandManager());
