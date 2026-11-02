@@ -6,6 +6,11 @@ and Maven versions. Tags must match the base version in `gradle.properties` and
 point into the default branch history. Advance the development version after release.
 Other branches and pull requests only build and test. Java 25 is required.
 
+Manual runs are available through Actions → Build and publish → Run workflow,
+or `gh workflow run gradle.yml --ref dev/4.0.0`. Manual runs publish development
+builds only on the default branch; stable publication still requires a tag push.
+Forks must have GitHub Actions enabled in repository settings first.
+
 Configure GitHub Actions variables `R2_ENDPOINT` (the bucket's S3 API endpoint,
 including jurisdiction if applicable) and `R2_BUCKET`; configure secrets
 `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` with read/write access only to that
