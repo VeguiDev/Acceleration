@@ -9,7 +9,7 @@ import time
 import zipfile
 import threading
 import proxy_chain as mc
-from apdp_network import wait, enroll
+from apdp_network import wait, enroll, temporary_root
 
 
 class Proxy:
@@ -47,7 +47,7 @@ def plugin(jar, root):
 
 def main():
     jar = Path(sys.argv[1]).resolve(strict=True)
-    with tempfile.TemporaryDirectory(prefix="adcr-commands-", dir="/tmp/opencode") as temporary:
+    with tempfile.TemporaryDirectory(prefix="adcr-commands-", dir=temporary_root()) as temporary:
         root = Path(temporary)
         fixture = mc.Backend(commands=True, lifetime=60)
         second = mc.Backend(commands=True, lifetime=60)

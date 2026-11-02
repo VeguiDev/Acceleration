@@ -2,10 +2,11 @@
 """Four real Acceleration JVMs, zero players/Paper/EULA/accounts; stdlib only.
 
 Usage: python3 tests/integration/apdp_network.py <acceleration-all.jar>
-All state is isolated in /tmp/opencode; no existing testnet is modified.
+All state is isolated in temporary directories; no existing testnet is modified.
 """
 import base64
 import json
+import os
 import pathlib
 import re
 import socket
@@ -13,6 +14,14 @@ import subprocess
 import sys
 import tempfile
 import time
+
+
+def temporary_root():
+    """Use runner storage in CI, the approved local directory, or stdlib defaults."""
+    if os.environ.get("RUNNER_TEMP"):
+        return os.environ["RUNNER_TEMP"]
+    local = pathlib.Path("/tmp/opencode")
+    return str(local) if local.is_dir() else None
 
 
 def port():
@@ -117,7 +126,7 @@ def enroll(parent, child, delegate):
 
 def main():
     jar = pathlib.Path(sys.argv[1]).resolve(strict=True)
-    with tempfile.TemporaryDirectory(prefix="apdp-network-", dir="/tmp/opencode") as temporary:
+    with tempfile.TemporaryDirectory(prefix="apdp-network-", dir=temporary_root()) as temporary:
         directory = pathlib.Path(temporary)
         processes = []
         try:

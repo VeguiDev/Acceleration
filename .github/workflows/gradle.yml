@@ -32,6 +32,7 @@ jobs:
       - name: Publishing tests and Velocity API compatibility guard
         run: |
           python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 -m unittest discover -s tests/integration -p 'test_*.py'
           git diff --exit-code ed4c46ef -- api/src/main/java/com/velocitypowered api/src/ap
       - name: Integration tests
         run: |
