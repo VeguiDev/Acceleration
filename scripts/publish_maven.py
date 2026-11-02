@@ -7,7 +7,17 @@ import hashlib
 import os
 from pathlib import Path
 import sys
+import urllib.request
 import xml.etree.ElementTree as ET
+
+
+def verify_public(key, expected):
+    request = urllib.request.Request(
+        "https://repo.vegui.dev/" + key,
+        headers={"User-Agent": "Acceleration-Maven-Publisher/1.0"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        if hashlib.sha256(response.read()).digest() != hashlib.sha256(expected).digest():
+            raise ValueError("Public repository returned stale or corrupt content")
 
 
 def merge_metadata(previous, incoming):
@@ -102,13 +112,10 @@ def publish(directory):
             put(key + "." + algorithm, hashlib.new(algorithm, data).hexdigest().encode(), True)
         put(key, data, True)
     # Validate the public path, not just authenticated bucket access.
-    import urllib.request
     for path in artifacts:
         if path.suffix in (".jar", ".pom"):
             key = path.relative_to(directory).as_posix()
-            with urllib.request.urlopen("https://repo.vegui.dev/" + key, timeout=60) as response:
-                if hashlib.sha256(response.read()).digest() != hashlib.sha256(path.read_bytes()).digest():
-                    raise ValueError("Public repository returned stale or corrupt content")
+            verify_public(key, path.read_bytes())
 
 
 if __name__ == "__main__":
