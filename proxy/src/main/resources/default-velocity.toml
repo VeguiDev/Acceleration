@@ -1,5 +1,5 @@
 # Config version. Do not change this
-config-version = "2.9"
+config-version = "3.0"
 
 # What port should the proxy be bound to? By default, we'll bind to all addresses on port 25565.
 bind = "0.0.0.0:25565"
@@ -192,6 +192,44 @@ tab-complete-rate-limit = 10
 # How many tab completions are allowed to be sent after the rate limit is hit before the player is kicked?
 # Setting this to 0 or lower will disable this feature.
 kick-after-rate-limited-tab-completes = 0
+
+[connection-scheduler]
+# Enables the connection operation scheduler. The scheduler serialises backend connections
+# per player and applies a cooldown between connection attempts. This prevents race conditions
+# during rapid server switches, especially with Geyser/Bedrock clients.
+enabled = true
+
+# Scheduling policy: IMMEDIATE, SERIALIZED or COOLDOWN.
+# IMMEDIATE bypasses the queue and cooldown, SERIALIZED queues operations without a cooldown,
+# and COOLDOWN queues operations and waits for the configured cooldown.
+policy = "COOLDOWN"
+
+# Allows critical recovery operations (initial server connection and failover) to bypass the
+# cooldown and queue limits.
+recovery-bypass = true
+
+[connection-scheduler.per-player]
+# Minimum time between the end of one backend connection and the start of the next one.
+# Accepts values such as "100ms", "1s" or "2m".
+cooldown = "100ms"
+
+# Maximum number of queued operations per player. 0 means unlimited.
+max-pending = 2
+
+# When true, a new request replaces all pending requests for the same player instead of
+# waiting behind them. The operation that is already running is never interrupted.
+coalesce-pending = false
+
+# Maximum time an operation may wait in the queue before being cancelled.
+queue-timeout = "15s"
+
+# Maximum time a backend connection may take before it is disconnected.
+operation-timeout = "30s"
+
+[connection-scheduler.global]
+# Maximum number of simultaneous backend connections across all players.
+# 0 means unlimited.
+max-concurrent = 0
 
 [query]
 # Whether to enable responding to GameSpy 4 query responses or not.

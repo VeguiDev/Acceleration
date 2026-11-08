@@ -278,7 +278,7 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
             true);
         return;
       }
-      player.createConnectionRequest(toTry.get()).fireAndForget();
+      player.fireAndForgetWithRecovery(toTry.get());
     }, mcConnection.eventLoop());
   }
 

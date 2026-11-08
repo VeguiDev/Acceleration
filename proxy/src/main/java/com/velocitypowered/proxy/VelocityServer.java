@@ -52,6 +52,7 @@ import com.velocitypowered.proxy.command.builtin.VelocityCommand;
 import com.velocitypowered.proxy.config.VelocityConfiguration;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.player.resourcepack.VelocityResourcePackInfo;
+import com.velocitypowered.proxy.connection.scheduler.ConnectionOperationScheduler;
 import com.velocitypowered.proxy.connection.util.ServerListPingHandler;
 import com.velocitypowered.proxy.console.VelocityConsole;
 import com.velocitypowered.proxy.crypto.EncryptionUtils;
@@ -173,6 +174,7 @@ public class VelocityServer implements dev.vegui.acceleration.api.AccelerationPr
   private @MonotonicNonNull VelocityConfiguration configuration;
   private @MonotonicNonNull ApdpService apdp;
   private @MonotonicNonNull AdcrService adcr;
+  private @MonotonicNonNull ConnectionOperationScheduler connectionScheduler;
 
   public AdcrService getAdcr() {
     return adcr;
@@ -180,6 +182,15 @@ public class VelocityServer implements dev.vegui.acceleration.api.AccelerationPr
 
   public ApdpService getApdp() {
     return apdp;
+  }
+
+  /**
+   * Returns the connection operation scheduler.
+   *
+   * @return the connection scheduler
+   */
+  public ConnectionOperationScheduler getConnectionScheduler() {
+    return connectionScheduler;
   }
 
   private @MonotonicNonNull KeyPair serverKeyPair;
@@ -264,7 +275,7 @@ public class VelocityServer implements dev.vegui.acceleration.api.AccelerationPr
   }
 
   @EnsuresNonNull({"serverKeyPair", "servers", "pluginManager", "eventManager", "scheduler",
-      "console", "cm", "configuration"})
+      "console", "cm", "configuration", "connectionScheduler"})
   void start() {
     logger.info("Booting up {} {}...", getVersion().getName(), getVersion().getVersion());
     console.setupStreams();
@@ -320,6 +331,8 @@ public class VelocityServer implements dev.vegui.acceleration.api.AccelerationPr
     commandManager.rememberDistributedBuiltin("send");
 
     this.doStartupConfigLoad();
+    connectionScheduler = new ConnectionOperationScheduler(this,
+        configuration.getConnectionScheduler());
 
     registerTranslations();
 
@@ -632,6 +645,9 @@ public class VelocityServer implements dev.vegui.acceleration.api.AccelerationPr
     commandManager.setAnnounceProxyCommands(newConfiguration.isAnnounceProxyCommands());
     ipAttemptLimiter = Ratelimiters.createWithMilliseconds(newConfiguration.getLoginRatelimit());
     this.configuration = newConfiguration;
+    if (connectionScheduler != null) {
+      connectionScheduler.reconfigure(newConfiguration.getConnectionScheduler());
+    }
     eventManager.fireAndForget(new ProxyReloadEvent());
     return true;
   }
@@ -677,6 +693,10 @@ public class VelocityServer implements dev.vegui.acceleration.api.AccelerationPr
         logger.warn("Interrupted while waiting for ProxyPreShutdownEvent; continuing shutdown.");
       }
 
+      // Pre-shutdown handlers may still move players; stop scheduling new connections now.
+      if (connectionScheduler != null) {
+        connectionScheduler.close();
+      }
       cm.shutdown();
 
       ImmutableList<ConnectedPlayer> players = ImmutableList.copyOf(connectionsByUuid.values());

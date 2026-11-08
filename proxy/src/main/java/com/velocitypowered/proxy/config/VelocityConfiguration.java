@@ -27,6 +27,7 @@ import com.google.gson.annotations.Expose;
 import com.velocitypowered.api.proxy.config.ProxyConfig;
 import com.velocitypowered.api.util.Favicon;
 import com.velocitypowered.proxy.config.migration.ConfigurationMigration;
+import com.velocitypowered.proxy.config.migration.ConnectionSchedulerMigration;
 import com.velocitypowered.proxy.config.migration.ForwardingMigration;
 import com.velocitypowered.proxy.config.migration.KeyAuthenticationMigration;
 import com.velocitypowered.proxy.config.migration.MiniMessageTranslationsMigration;
@@ -103,6 +104,8 @@ public class VelocityConfiguration implements ProxyConfig {
   private boolean forceKeyAuthentication = true; // Added in 1.19
   @Expose
   private PacketLimiterConfig packetLimiterConfig = PacketLimiterConfig.DEFAULT;
+  @Expose
+  private ConnectionSchedulerConfig connectionScheduler = ConnectionSchedulerConfig.DEFAULT;
 
   private VelocityConfiguration(Servers servers, ForcedHosts forcedHosts, Advanced advanced,
       Query query, Metrics metrics) {
@@ -119,7 +122,8 @@ public class VelocityConfiguration implements ProxyConfig {
       boolean onlineModeKickExistingPlayers, PingPassthroughMode pingPassthrough,
       boolean samplePlayersInPing, boolean enablePlayerAddressLogging, Servers servers,
       ForcedHosts forcedHosts, Advanced advanced, Query query, Metrics metrics,
-      boolean forceKeyAuthentication, PacketLimiterConfig packetLimiterConfig) {
+      boolean forceKeyAuthentication, PacketLimiterConfig packetLimiterConfig,
+      ConnectionSchedulerConfig connectionScheduler) {
     this.bind = bind;
     this.motd = motd;
     this.showMaxPlayers = showMaxPlayers;
@@ -139,6 +143,7 @@ public class VelocityConfiguration implements ProxyConfig {
     this.metrics = metrics;
     this.forceKeyAuthentication = forceKeyAuthentication;
     this.packetLimiterConfig = packetLimiterConfig;
+    this.connectionScheduler = connectionScheduler;
   }
 
   /**
@@ -244,6 +249,10 @@ public class VelocityConfiguration implements ProxyConfig {
 
     if (advanced.commandRateLimit < 0) {
       logger.error("Invalid command rate limit {}", advanced.commandRateLimit);
+      valid = false;
+    }
+
+    if (!connectionScheduler.validate(logger)) {
       valid = false;
     }
 
@@ -469,6 +478,15 @@ public class VelocityConfiguration implements ProxyConfig {
     return packetLimiterConfig;
   }
 
+  /**
+   * Returns the connection operation scheduler configuration.
+   *
+   * @return the connection scheduler configuration
+   */
+  public ConnectionSchedulerConfig getConnectionScheduler() {
+    return connectionScheduler;
+  }
+
   @Override
   public String toString() {
     return MoreObjects.toStringHelper(this)
@@ -486,6 +504,7 @@ public class VelocityConfiguration implements ProxyConfig {
         .add("enablePlayerAddressLogging", enablePlayerAddressLogging)
         .add("forceKeyAuthentication", forceKeyAuthentication)
         .add("packetLimiterConfig", packetLimiterConfig)
+        .add("connectionScheduler", connectionScheduler)
         .toString();
   }
 
@@ -528,6 +547,7 @@ public class VelocityConfiguration implements ProxyConfig {
           new TransferIntegrationMigration(),
           new PacketLimiterMigration(),
           new PingPassthroughMigration(),
+          new ConnectionSchedulerMigration(),
       };
 
       for (final ConfigurationMigration migration : migrations) {
@@ -583,6 +603,8 @@ public class VelocityConfiguration implements ProxyConfig {
       final boolean enablePlayerAddressLogging = config.getOrElse(
               "enable-player-address-logging", true);
       final PacketLimiterConfig packetLimiterConfig = PacketLimiterConfig.fromConfig(config.get("packet-limiter"));
+      final ConnectionSchedulerConfig connectionSchedulerConfig =
+          ConnectionSchedulerConfig.fromConfig(config.get("connection-scheduler"));
 
       // Throw an exception if the forwarding-secret file is empty and the proxy is using a
       // forwarding mode that requires it.
@@ -611,7 +633,8 @@ public class VelocityConfiguration implements ProxyConfig {
               new Query(queryConfig),
               new Metrics(metricsConfig),
               forceKeyAuthentication,
-              packetLimiterConfig
+              packetLimiterConfig,
+              connectionSchedulerConfig
       );
       result.proxyBackend = config.getOrElse("proxy-backend", false);
       result.proxyBackendSecret = forwardingSecret.clone();

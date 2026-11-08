@@ -59,6 +59,7 @@ import com.velocitypowered.api.util.ModInfo;
 import com.velocitypowered.api.util.ServerLink;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.adventure.VelocityBossBarImplementation;
+import com.velocitypowered.proxy.config.ConnectionSchedulerConfig.Policy;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftConnectionAssociation;
 import com.velocitypowered.proxy.connection.backend.VelocityServerConnection;
@@ -66,6 +67,8 @@ import com.velocitypowered.proxy.connection.player.bossbar.BossBarManager;
 import com.velocitypowered.proxy.connection.player.bundle.BundleDelimiterHandler;
 import com.velocitypowered.proxy.connection.player.resourcepack.VelocityResourcePackInfo;
 import com.velocitypowered.proxy.connection.player.resourcepack.handler.ResourcePackHandler;
+import com.velocitypowered.proxy.connection.scheduler.ConnectionOperation;
+import com.velocitypowered.proxy.connection.scheduler.ConnectionOperationScheduler;
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
 import com.velocitypowered.proxy.connection.util.VelocityInboundConnection;
@@ -600,6 +603,52 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     return new ConnectionRequestBuilderImpl(server, previousConnection);
   }
 
+  /**
+   * Connects the player to a server using an explicit scheduling policy.
+   *
+   * @param server the destination server
+   * @param policy the scheduling policy
+   * @return the connection result
+   */
+  public CompletableFuture<ConnectionRequestBuilder.Result> connectWithPolicy(
+      RegisteredServer server, Policy policy) {
+    return new ConnectionRequestBuilderImpl(server, this.connectedServer).connect(policy, false);
+  }
+
+  /**
+   * Connects the player as part of a critical recovery operation.
+   *
+   * <p>Recovery operations use the configured policy but are allowed to bypass the cooldown and
+   * queue limits when {@code recovery-bypass} is enabled.</p>
+   *
+   * @param server the destination server
+   * @return the connection result
+   */
+  public CompletableFuture<ConnectionRequestBuilder.Result> connectWithRecovery(
+      RegisteredServer server) {
+    return new ConnectionRequestBuilderImpl(server, this.connectedServer)
+        .connect(recoveryPolicy(), true);
+  }
+
+  private CompletableFuture<ConnectionRequestBuilder.Result> connectWithRecovery(
+      RegisteredServer server, @Nullable VelocityServerConnection previousConnection) {
+    return new ConnectionRequestBuilderImpl(server, previousConnection)
+        .connect(recoveryPolicy(), true);
+  }
+
+  void fireAndForgetWithRecovery(RegisteredServer server) {
+    new ConnectionRequestBuilderImpl(server, this.connectedServer)
+        .fireAndForget(recoveryPolicy(), true);
+  }
+
+  private Policy recoveryPolicy() {
+    final ConnectionOperationScheduler scheduler = this.server.getConnectionScheduler();
+    if (scheduler == null || !scheduler.config().enabled()) {
+      return Policy.IMMEDIATE;
+    }
+    return scheduler.config().policy();
+  }
+
   @Override
   public List<GameProfile.Property> getGameProfileProperties() {
     return this.profile.getProperties();
@@ -799,7 +848,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
       switch (event.getResult()) {
         case DisconnectPlayer res -> disconnect(res.getReasonComponent());
-        case RedirectPlayer res -> createConnectionRequest(res.getServer(), previousConnection).connect()
+        case RedirectPlayer res -> connectWithRecovery(res.getServer(), previousConnection)
                 .whenCompleteAsync((status, throwable) -> {
                   if (throwable != null) {
                     handleConnectionException(res.getServer(), throwable, true);
@@ -890,7 +939,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
       String toTryName = serversToTry.get(i);
       if ((connectedServer != null && hasSameName(connectedServer.getServer(), toTryName))
           || (connectionInFlight != null && hasSameName(connectionInFlight.getServer(), toTryName))
-          || (current != null && hasSameName(current, toTryName))) {
+          || (current != null && hasSameName(current, toTryName))
+          || (server.getConnectionScheduler() != null
+              && server.getConnectionScheduler().isPending(this, toTryName))) {
         continue;
       }
 
@@ -937,6 +988,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   }
 
   void teardown() {
+    if (server.getConnectionScheduler() != null) {
+      server.getConnectionScheduler().cancelAll(this);
+    }
     if (server.getAdcr() != null) {
       server.getAdcr().disconnect(this);
     }
@@ -1444,13 +1498,25 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     }
 
     private Optional<ConnectionRequestBuilder.Status> checkServer(RegisteredServer server) {
+      return checkServer(server, false);
+    }
+
+    private Optional<ConnectionRequestBuilder.Status> checkServer(RegisteredServer server,
+        boolean allowQueue) {
       Preconditions.checkArgument(server instanceof VelocityRegisteredServer,
           "Not a valid Velocity server.");
-      if (connectionInFlight != null || (connectedServer != null
-          && !connectedServer.hasCompletedJoin())) {
-        return Optional.of(ConnectionRequestBuilder.Status.CONNECTION_IN_PROGRESS);
+      final boolean busy = connectionInFlight != null
+          || (connectedServer != null && !connectedServer.hasCompletedJoin());
+      if (busy) {
+        final VelocityServerConnection busyConnection = connectionInFlight != null
+            ? connectionInFlight : connectedServer;
+        final boolean sameTarget = busyConnection != null
+            && busyConnection.getServer().getServerInfo().equals(server.getServerInfo());
+        if (sameTarget || !allowQueue) {
+          return Optional.of(ConnectionRequestBuilder.Status.CONNECTION_IN_PROGRESS);
+        }
       }
-      if (connectedServer != null
+      if (connectedServer != null && connectedServer.hasCompletedJoin()
           && connectedServer.getServer().getServerInfo().equals(server.getServerInfo())) {
         return Optional.of(ALREADY_CONNECTED);
       }
@@ -1458,10 +1524,16 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     }
 
     private CompletableFuture<Optional<Status>> getInitialStatus() {
-      return CompletableFuture.supplyAsync(() -> checkServer(toConnect), connection.eventLoop());
+      return CompletableFuture.supplyAsync(() -> checkServer(toConnect, schedulerEnabled()),
+          connection.eventLoop());
     }
 
-    private CompletableFuture<Impl> internalConnect() {
+    private boolean schedulerEnabled() {
+      final ConnectionOperationScheduler scheduler = server.getConnectionScheduler();
+      return scheduler != null && scheduler.config().enabled();
+    }
+
+    private CompletableFuture<Impl> internalConnect(Policy policy, boolean recovery) {
       return this.getInitialStatus().thenCompose(initialCheck -> {
         if (initialCheck.isPresent()) {
           return completedFuture(plainResult(initialCheck.get(), toConnect));
@@ -1477,28 +1549,68 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
           }
 
           RegisteredServer realDestination = newDest.get();
-          Optional<ConnectionRequestBuilder.Status> check = checkServer(realDestination);
+          Optional<ConnectionRequestBuilder.Status> check =
+              checkServer(realDestination, schedulerEnabled());
           if (check.isPresent()) {
             return completedFuture(plainResult(check.get(), realDestination));
           }
 
           VelocityRegisteredServer vrs = (VelocityRegisteredServer) realDestination;
-          VelocityServerConnection con =
-              new VelocityServerConnection(vrs, previousServer, ConnectedPlayer.this, server);
-          connectionInFlight = con;
-
-          return con.connect().whenCompleteAsync((result, exception) -> {
-            if (result != null && !result.isSuccessful() && !result.isSafe()) {
-              handleConnectionException(result.getAttemptedConnection(),
-                  // The only way for the reason to be null is if the result is safe
-                  DisconnectPacket.create(result.getReasonComponent().orElseThrow(),
-                      getProtocolVersion(), connection.getState()), false);
-            }
-            this.resetIfInFlightIs(con);
-          },
-              connection.eventLoop());
+          final ConnectionOperationScheduler scheduler = server.getConnectionScheduler();
+          if (scheduler == null) {
+            return startConnection(vrs, null);
+          }
+          return scheduler.submit(ConnectedPlayer.this, vrs, previousServer, policy, recovery,
+              operation -> connectOperation(operation, vrs));
         }, connection.eventLoop());
       });
+    }
+
+    private CompletableFuture<Impl> connectOperation(ConnectionOperation operation,
+        VelocityRegisteredServer destination) {
+      Optional<ConnectionRequestBuilder.Status> check = checkServerAtExecution(destination);
+      if (check.isPresent()) {
+        return completedFuture(plainResult(check.get(), destination));
+      }
+      return startConnection(destination, operation);
+    }
+
+    private Optional<ConnectionRequestBuilder.Status> checkServerAtExecution(
+        RegisteredServer server) {
+      final Optional<ConnectionRequestBuilder.Status> check = checkServer(server, false);
+      if (check.isPresent()
+          && check.get() == ConnectionRequestBuilder.Status.CONNECTION_IN_PROGRESS
+          && schedulerEnabled()
+          && connectionInFlight == null
+          && (connectedServer == null
+              || !connectedServer.getServer().getServerInfo().equals(server.getServerInfo()))) {
+        // The previous socket has finished connecting but its join may still be in progress.
+        // The scheduler guarantees that no other socket is in flight, so allow the queued
+        // switch instead of rejecting it with CONNECTION_IN_PROGRESS.
+        return Optional.empty();
+      }
+      return check;
+    }
+
+    private CompletableFuture<Impl> startConnection(VelocityRegisteredServer destination,
+        @Nullable ConnectionOperation operation) {
+      VelocityServerConnection con =
+          new VelocityServerConnection(destination, previousServer, ConnectedPlayer.this, server);
+      if (operation != null) {
+        operation.attachConnection(con);
+      }
+      connectionInFlight = con;
+
+      return con.connect().whenCompleteAsync((result, exception) -> {
+        if (result != null && !result.isSuccessful() && !result.isSafe()) {
+          handleConnectionException(result.getAttemptedConnection(),
+              // The only way for the reason to be null is if the result is safe
+              DisconnectPacket.create(result.getReasonComponent().orElseThrow(),
+                  getProtocolVersion(), connection.getState()), false);
+        }
+        this.resetIfInFlightIs(con);
+      },
+          connection.eventLoop());
     }
 
     private void resetIfInFlightIs(VelocityServerConnection establishedConnection) {
@@ -1509,12 +1621,28 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
     @Override
     public CompletableFuture<Result> connect() {
-      return this.internalConnect().thenApply(x -> x);
+      return this.internalConnect(defaultPolicy(), false).thenApply(x -> x);
+    }
+
+    CompletableFuture<Result> connect(Policy policy, boolean recovery) {
+      return this.internalConnect(policy, recovery).thenApply(x -> x);
+    }
+
+    private Policy defaultPolicy() {
+      final ConnectionOperationScheduler scheduler = server.getConnectionScheduler();
+      if (scheduler == null || !scheduler.config().enabled()) {
+        return Policy.IMMEDIATE;
+      }
+      return scheduler.config().policy();
     }
 
     @Override
     public CompletableFuture<Boolean> connectWithIndication() {
-      return internalConnect().whenCompleteAsync((status, throwable) -> {
+      return connectWithIndication(defaultPolicy(), false);
+    }
+
+    CompletableFuture<Boolean> connectWithIndication(Policy policy, boolean recovery) {
+      return internalConnect(policy, recovery).whenCompleteAsync((status, throwable) -> {
         if (throwable != null) {
           handleConnectionException(toConnect, throwable, true);
           return;
@@ -1541,7 +1669,11 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
     @Override
     public void fireAndForget() {
-      connectWithIndication();
+      connectWithIndication(defaultPolicy(), false);
+    }
+
+    void fireAndForget(Policy policy, boolean recovery) {
+      connectWithIndication(policy, recovery);
     }
   }
 }

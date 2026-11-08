@@ -34,6 +34,9 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.util.ProxyVersion;
 import com.velocitypowered.proxy.VelocityServer;
+import com.velocitypowered.proxy.config.ConnectionSchedulerConfig;
+import com.velocitypowered.proxy.connection.scheduler.ConnectionOperationScheduler;
+import com.velocitypowered.proxy.connection.scheduler.ConnectionSchedulerMetrics;
 import com.velocitypowered.proxy.util.InformationUtils;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -50,6 +53,7 @@ import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -97,9 +101,15 @@ public final class VelocityCommand {
         .requires(source -> source.getPermissionValue("velocity.command.reload") == Tristate.TRUE)
         .executes(new Reload(server))
         .build();
+    final LiteralCommandNode<CommandSource> connections = BrigadierCommand
+        .literalArgumentBuilder("connections")
+        .requires(source -> source.getPermissionValue("velocity.command.connections")
+            == Tristate.TRUE)
+        .executes(new Connections(server))
+        .build();
 
     final List<LiteralCommandNode<CommandSource>> commands = List
-            .of(dump, heap, info, plugins, reload);
+            .of(dump, heap, info, plugins, reload, connections);
     return new BrigadierCommand(
       commands.stream()
         .reduce(
@@ -148,8 +158,59 @@ public final class VelocityCommand {
     }
   }
 
-  private record Info(ProxyServer server) implements Command<CommandSource> {
+  private record Connections(VelocityServer server) implements Command<CommandSource> {
 
+    @Override
+    public int run(final CommandContext<CommandSource> context) {
+      final CommandSource source = context.getSource();
+      final ConnectionOperationScheduler scheduler = server.getConnectionScheduler();
+      if (scheduler == null) {
+        source.sendMessage(Component.text("Connection scheduler is not available.",
+            NamedTextColor.RED));
+        return Command.SINGLE_SUCCESS;
+      }
+
+      final ConnectionSchedulerConfig config = scheduler.config();
+      final ConnectionSchedulerMetrics.Snapshot metrics = scheduler.metrics().snapshot();
+
+      source.sendMessage(Component.text("Connection scheduler: "
+          + (config.enabled() ? "enabled" : "disabled")
+          + " (policy=" + config.policy()
+          + ", cooldown=" + config.cooldown().toMillis() + "ms"
+          + ", max-pending=" + config.maxPending()
+          + ", max-concurrent=" + config.maxConcurrent() + ")", NamedTextColor.AQUA));
+      source.sendMessage(Component.text("Queues: " + metrics.playersWithQueues()
+          + " players, " + metrics.queued() + " queued, " + metrics.running()
+          + " running, " + metrics.globalWaiting() + " waiting for global permit",
+          NamedTextColor.GRAY));
+      source.sendMessage(Component.text("Operations: submitted=" + metrics.submitted()
+          + ", started=" + metrics.started()
+          + ", succeeded=" + metrics.succeeded()
+          + ", failed=" + metrics.failed()
+          + ", cancelled=" + metrics.cancelled()
+          + ", superseded=" + metrics.superseded()
+          + ", coalesced=" + metrics.coalesced(), NamedTextColor.GRAY));
+      source.sendMessage(Component.text("Limits: rejected-queue-full="
+          + metrics.rejectedQueueFull()
+          + ", queue-timeouts=" + metrics.timedOutQueue()
+          + ", operation-timeouts=" + metrics.timedOutOperation()
+          + ", immediate-bypass=" + metrics.immediateBypass()
+          + ", cooldown-waits=" + metrics.cooldownWaits()
+          + ", global-waits=" + metrics.globalWaits(), NamedTextColor.GRAY));
+      source.sendMessage(Component.text("Latency: avg queue="
+          + String.format(Locale.ROOT, "%.2f", metrics.averageQueueWaitMillis())
+          + "ms, max queue="
+          + String.format(Locale.ROOT, "%.2f", metrics.maxQueueWaitNanos() / 1_000_000.0)
+          + "ms, avg connect="
+          + String.format(Locale.ROOT, "%.2f", metrics.averageRunMillis())
+          + "ms, max connect="
+          + String.format(Locale.ROOT, "%.2f", metrics.maxRunNanos() / 1_000_000.0)
+          + "ms", NamedTextColor.GRAY));
+      return Command.SINGLE_SUCCESS;
+    }
+  }
+
+  private record Info(ProxyServer server) implements Command<CommandSource> {
     private static final TextColor VELOCITY_COLOR = TextColor.color(0x09add3);
 
     @Override

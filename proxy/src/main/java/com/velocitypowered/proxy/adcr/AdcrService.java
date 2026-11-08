@@ -21,6 +21,7 @@ import com.google.gson.JsonObject;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.apdp.ApdpService;
 import com.velocitypowered.proxy.apdp.protocol.Wire;
+import com.velocitypowered.proxy.config.ConnectionSchedulerConfig;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.backend.VelocityServerConnection;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
@@ -542,7 +543,9 @@ public final class AdcrService {
             if (player.getCurrentServer().map(value -> value.getServer() == destination).orElse(false)) {
               return CompletableFuture.completedFuture(true);
             }
-            return player.createConnectionRequest(destination).connect().thenApply(result ->
+            return player.connectWithPolicy(destination,
+                    ConnectionSchedulerConfig.Policy.SERIALIZED)
+                .thenApply(result ->
                 result.isSuccessful() && player.getCurrentServer().map(value ->
                     value.getServer() == destination).orElse(false));
           }).get(8, TimeUnit.SECONDS);
